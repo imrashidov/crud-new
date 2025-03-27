@@ -37,13 +37,13 @@ export class AuthService {
     });
     // if user does not exist
     if (!user) {
-      throw new ForbiddenException("Email is incorrect");
+      throw new ForbiddenException("Email or password is incorrect");
     }
     // check if password is correct
     const pwMatches = await argon.verify(user.hash, dto.password);
     // if password is incorrect
     if (!pwMatches) {
-      throw new ForbiddenException("Password is incorrect");
+      throw new ForbiddenException("Email or password is incorrect");
     }
     // send back the user
     const { hash: _, ...userWithoutHash } = user;
