@@ -1,52 +1,75 @@
-import { ForbiddenException, Injectable } from "@nestjs/common";
-import { PrismaService } from "src/prisma/prisma.service";
-import { AuthDto } from "./dto";
+import { Injectable, ForbiddenException } from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
 import * as argon from "argon2";
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
+import { AuthDto } from "./dto";
+
+interface User {
+  id: number;
+  email: string;
+  hash: string;
+  firstName?: string;
+  lastName?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Temporary in-memory storage
+const users = new Map<number, User>();
+
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private jwt: JwtService) {}
 
   async signup(dto: AuthDto) {
-    try {
-      const hash = await argon.hash(dto.password);
-      const user = await this.prisma.user.create({
-        data: {
-          email: dto.email,
-          hash,
-        },
-      });
-      const { hash: _, ...userWithoutHash } = user;
-      return userWithoutHash;
-    } catch (error) {
-      if (error instanceof PrismaClientKnownRequestError) {
-        if (error.code === "P2002") {
-          throw new ForbiddenException("Email has already been taken");
-        }
-      }
-      throw error;
-    }
+    const hash = await argon.hash(dto.password);
+
+    const user: User = {
+      id: users.size + 1,
+      email: dto.email,
+      hash,
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    users.set(user.id, user);
+
+    const token = await this.signToken(user.id, user.email);
+
+    return {
+      access_token: token,
+    };
   }
 
   async signin(dto: AuthDto) {
-    // find the user by email
-    const user = await this.prisma.user.findUnique({
-      where: {
-        email: dto.email,
-      },
-    });
-    // if user does not exist
+    const user = Array.from(users.values()).find((u) => u.email === dto.email);
+
     if (!user) {
-      throw new ForbiddenException("Email or password is incorrect");
+      throw new ForbiddenException("User not found");
     }
-    // check if password is correct
+
     const pwMatches = await argon.verify(user.hash, dto.password);
-    // if password is incorrect
+
     if (!pwMatches) {
-      throw new ForbiddenException("Email or password is incorrect");
+      throw new ForbiddenException("Invalid credentials");
     }
-    // send back the user
-    const { hash: _, ...userWithoutHash } = user;
-    return userWithoutHash;
+
+    const token = await this.signToken(user.id, user.email);
+
+    return {
+      access_token: token,
+    };
+  }
+
+  async signToken(userId: number, email: string): Promise<string> {
+    const payload = {
+      sub: userId,
+      email,
+    };
+
+    return this.jwt.signAsync(payload, {
+      expiresIn: "15m",
+    });
   }
 }
